@@ -43,6 +43,13 @@ abstract class Model implements JsonSerializable, ArrayAccess, Arrayable, Jsonab
     use model\concern\TimeStamp;
     use model\concern\Conversion;
 
+
+    /**
+     * 最后一次更新记录影响行数
+     * @var int
+     */
+    public static $upResult;
+
     /**
      * 数据是否存在
      * @var bool
@@ -408,6 +415,7 @@ abstract class Model implements JsonSerializable, ArrayAccess, Arrayable, Jsonab
 
     protected function checkResult($result): void
     {
+        self::$upResult = $result;
     }
 
     /**
@@ -632,8 +640,9 @@ abstract class Model implements JsonSerializable, ArrayAccess, Arrayable, Jsonab
 
         // 模型更新
         $db = $this->db();
+        $db->startTrans();
 
-        $db->transaction(function () use ($data, $allowFields, $db) {
+        try {
             $this->key = null;
             $where     = $this->getWhere();
 
@@ -650,12 +659,17 @@ abstract class Model implements JsonSerializable, ArrayAccess, Arrayable, Jsonab
             if (!empty($this->relationWrite)) {
                 $this->autoRelationUpdate();
             }
-        });
 
-        // 更新回调
-        $this->trigger('AfterUpdate');
+            $db->commit();
 
-        return true;
+            // 更新回调
+            $this->trigger('AfterUpdate');
+
+            return true;
+        } catch (\Exception $e) {
+            $db->rollback();
+            throw $e;
+        }
     }
 
     /**
@@ -687,8 +701,9 @@ abstract class Model implements JsonSerializable, ArrayAccess, Arrayable, Jsonab
         $allowFields = $this->checkAllowFields();
 
         $db = $this->db();
+        $db->startTrans();
 
-        $db->transaction(function () use ($sequence, $allowFields, $db) {
+        try {
             $result = $db->strict(false)
                 ->field($allowFields)
                 ->replace($this->replace)
@@ -708,15 +723,20 @@ abstract class Model implements JsonSerializable, ArrayAccess, Arrayable, Jsonab
             if (!empty($this->relationWrite)) {
                 $this->autoRelationInsert();
             }
-        });
 
-        // 标记数据已经存在
-        $this->exists = true;
+            $db->commit();
 
-        // 新增回调
-        $this->trigger('AfterInsert');
+            // 标记数据已经存在
+            $this->exists = true;
 
-        return true;
+            // 新增回调
+            $this->trigger('AfterInsert');
+
+            return true;
+        } catch (\Exception $e) {
+            $db->rollback();
+            throw $e;
+        }
     }
 
     /**
@@ -757,9 +777,9 @@ abstract class Model implements JsonSerializable, ArrayAccess, Arrayable, Jsonab
     public function saveAll(iterable $dataSet, bool $replace = true): Collection
     {
         $db = $this->db();
+        $db->startTrans();
 
-        $result = $db->transaction(function () use ($replace, $dataSet) {
-
+        try {
             $pk = $this->getPk();
 
             if (is_string($pk) && $replace) {
@@ -778,10 +798,13 @@ abstract class Model implements JsonSerializable, ArrayAccess, Arrayable, Jsonab
                 }
             }
 
-            return $result;
-        });
+            $db->commit();
 
-        return $this->toCollection($result);
+            return $this->toCollection($result);
+        } catch (\Exception $e) {
+            $db->rollback();
+            throw $e;
+        }
     }
 
     /**
@@ -799,8 +822,9 @@ abstract class Model implements JsonSerializable, ArrayAccess, Arrayable, Jsonab
         $where = $this->getWhere();
 
         $db = $this->db();
+        $db->startTrans();
 
-        $db->transaction(function () use ($where, $db) {
+        try {
             // 删除当前模型数据
             $db->where($where)->delete();
 
@@ -808,14 +832,19 @@ abstract class Model implements JsonSerializable, ArrayAccess, Arrayable, Jsonab
             if (!empty($this->relationWrite)) {
                 $this->autoRelationDelete();
             }
-        });
 
-        $this->trigger('AfterDelete');
+            $db->commit();
 
-        $this->exists   = false;
-        $this->lazySave = false;
+            $this->trigger('AfterDelete');
 
-        return true;
+            $this->exists   = false;
+            $this->lazySave = false;
+
+            return true;
+        } catch (\Exception $e) {
+            $db->rollback();
+            throw $e;
+        }
     }
 
     /**
